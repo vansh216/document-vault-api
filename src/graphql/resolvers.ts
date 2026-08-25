@@ -4,19 +4,63 @@ import { assertNonEmpty, assertValidSlug, ValidationError } from "../lib/validat
 
 export const resolvers = {
   Query: {
-    collections: async () => {
-      return prisma.collection.findMany({
-        orderBy: { createdAt: "desc" },
-      });
-    },
-
-    collection: async (_parent: unknown, args: { id: string }) => {
-      return prisma.collection.findUnique({
-        where: { id: args.id },
-        include: { documents: true },
-      });
-    },
+  collections: async () => {
+    return prisma.collection.findMany({
+      orderBy: { createdAt: "desc" },
+    });
   },
+
+  collection: async (_parent: unknown, args: { id: string }) => {
+    return prisma.collection.findUnique({
+      where: { id: args.id },
+      include: { documents: true },
+    });
+  },
+
+  documents: async (
+    _parent: unknown,
+    args: {
+      collectionId?: string | null;
+      search?: string | null;
+      isArchived?: boolean | null;
+      take?: number | null;
+      cursor?: string | null;
+    }
+  ) => {
+    const take = args.take ?? 10;
+
+    const where: Prisma.DocumentWhereInput = {
+      ...(args.collectionId ? { collectionId: args.collectionId } : {}),
+      ...(typeof args.isArchived === "boolean"
+        ? { isArchived: args.isArchived }
+        : {}),
+      ...(args.search
+        ? {
+            OR: [
+              { title: { contains: args.search, mode: "insensitive" } },
+              { content: { contains: args.search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const items = await prisma.document.findMany({
+      where,
+      take: take + 1,
+      ...(args.cursor ? { cursor: { id: args.cursor }, skip: 1 } : {}),
+      orderBy: { createdAt: "desc" },
+    });
+
+    const hasMore = items.length > take;
+    const page = hasMore ? items.slice(0, take) : items;
+    const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
+
+    return {
+      items: page,
+      nextCursor,
+    };
+  },
+},
 
   Mutation: {
     createCollection: async (
