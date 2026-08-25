@@ -4,63 +4,63 @@ import { assertNonEmpty, assertValidSlug, ValidationError } from "../lib/validat
 
 export const resolvers = {
   Query: {
-  collections: async () => {
-    return prisma.collection.findMany({
-      orderBy: { createdAt: "desc" },
-    });
+    collections: async () => {
+      return prisma.collection.findMany({
+        orderBy: { createdAt: "desc" },
+      });
+    },
+
+    collection: async (_parent: unknown, args: { id: string }) => {
+      return prisma.collection.findUnique({
+        where: { id: args.id },
+        include: { documents: true },
+      });
+    },
+
+    documents: async (
+      _parent: unknown,
+      args: {
+        collectionId?: string | null;
+        search?: string | null;
+        isArchived?: boolean | null;
+        take?: number | null;
+        cursor?: string | null;
+      }
+    ) => {
+      const take = args.take ?? 10;
+
+      const where: Prisma.DocumentWhereInput = {
+        ...(args.collectionId ? { collectionId: args.collectionId } : {}),
+        ...(typeof args.isArchived === "boolean"
+          ? { isArchived: args.isArchived }
+          : {}),
+        ...(args.search
+          ? {
+              OR: [
+                { title: { contains: args.search, mode: "insensitive" } },
+                { content: { contains: args.search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      };
+
+      const items = await prisma.document.findMany({
+        where,
+        take: take + 1,
+        ...(args.cursor ? { cursor: { id: args.cursor }, skip: 1 } : {}),
+        orderBy: { createdAt: "desc" },
+      });
+
+      const hasMore = items.length > take;
+      const page = hasMore ? items.slice(0, take) : items;
+      const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
+
+      return {
+        items: page,
+        nextCursor,
+      };
+    },
   },
-
-  collection: async (_parent: unknown, args: { id: string }) => {
-    return prisma.collection.findUnique({
-      where: { id: args.id },
-      include: { documents: true },
-    });
-  },
-
-  documents: async (
-    _parent: unknown,
-    args: {
-      collectionId?: string | null;
-      search?: string | null;
-      isArchived?: boolean | null;
-      take?: number | null;
-      cursor?: string | null;
-    }
-  ) => {
-    const take = args.take ?? 10;
-
-    const where: Prisma.DocumentWhereInput = {
-      ...(args.collectionId ? { collectionId: args.collectionId } : {}),
-      ...(typeof args.isArchived === "boolean"
-        ? { isArchived: args.isArchived }
-        : {}),
-      ...(args.search
-        ? {
-            OR: [
-              { title: { contains: args.search, mode: "insensitive" } },
-              { content: { contains: args.search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-    };
-
-    const items = await prisma.document.findMany({
-      where,
-      take: take + 1,
-      ...(args.cursor ? { cursor: { id: args.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: "desc" },
-    });
-
-    const hasMore = items.length > take;
-    const page = hasMore ? items.slice(0, take) : items;
-    const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
-
-    return {
-      items: page,
-      nextCursor,
-    };
-  },
-},
 
   Mutation: {
     createCollection: async (
@@ -119,6 +119,75 @@ export const resolvers = {
           collectionId: args.collectionId,
           tags: args.tags ?? [],
         },
+      });
+    },
+
+    updateDocument: async (
+      _parent: unknown,
+      args: {
+        id: string;
+        title?: string | null;
+        content?: string | null;
+        tags?: string[] | null;
+        isArchived?: boolean | null;
+      }
+    ) => {
+      const existing = await prisma.document.findUnique({ where: { id: args.id } });
+      if (!existing) {
+        throw new ValidationError(`No document found with id "${args.id}"`);
+      }
+
+      if (args.title !== undefined && args.title !== null) {
+        assertNonEmpty(args.title, "title");
+      }
+      if (args.content !== undefined && args.content !== null) {
+        assertNonEmpty(args.content, "content");
+      }
+
+      return prisma.document.update({
+        where: { id: args.id },
+        data: {
+          ...(args.title !== undefined && args.title !== null ? { title: args.title } : {}),
+          ...(args.content !== undefined && args.content !== null ? { content: args.content } : {}),
+          ...(args.tags !== undefined && args.tags !== null ? { tags: args.tags } : {}),
+          ...(args.isArchived !== undefined && args.isArchived !== null
+            ? { isArchived: args.isArchived }
+            : {}),
+        },
+      });
+    },
+
+    deleteDocument: async (_parent: unknown, args: { id: string }) => {
+      const existing = await prisma.document.findUnique({ where: { id: args.id } });
+      if (!existing) {
+        throw new ValidationError(`No document found with id "${args.id}"`);
+      }
+
+      await prisma.document.delete({ where: { id: args.id } });
+      return true;
+    },
+
+    moveDocument: async (
+      _parent: unknown,
+      args: { id: string; collectionId: string }
+    ) => {
+      const existing = await prisma.document.findUnique({ where: { id: args.id } });
+      if (!existing) {
+        throw new ValidationError(`No document found with id "${args.id}"`);
+      }
+
+      const targetCollection = await prisma.collection.findUnique({
+        where: { id: args.collectionId },
+      });
+      if (!targetCollection) {
+        throw new ValidationError(
+          `No collection found with id "${args.collectionId}"`
+        );
+      }
+
+      return prisma.document.update({
+        where: { id: args.id },
+        data: { collectionId: args.collectionId },
       });
     },
   },
