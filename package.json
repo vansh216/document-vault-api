@@ -4,7 +4,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch src/server.ts"
+    "dev": "bun run --watch src/server.ts",
+    "gendb": "bunx prisma migrate deploy && bunx prisma generate",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+     "sanity": "bun run typecheck && bun run test"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -12,7 +16,7 @@
     "dotenv": "^17.4.2"
   },
   "peerDependencies": {
-    "typescript": "^7"
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
